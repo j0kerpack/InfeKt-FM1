@@ -882,7 +882,9 @@ typedef struct {
     uint8_t cm_ok;                       /* CM_V1: cm holds the map */
     uint8_t cm[128];                     /* incoming controller c: 0 its own line (the fixed map), 1 + the line it was
                                           * given to (its patch byte, < CM_NT), 0xFF none (its line moved away) */
-    uint8_t cm_pad[3];
+    uint8_t cm_show;                     /* (GLO > MIDI > CC SHOW, in the map's padding: 1.19.6 .. saved 0 there, OFF)
+                                          * a fixed map controller's move says its parameter and value */
+    uint8_t cm_pad[2];
     /* (1.19.7: VOL A / B after the map; an object saved before is SET_LEN_V18 bytes or less: as shipped. 1.19.6
      * loads the first SET_LEN_V18 bytes (its object's size) and keeps everything else; saving, it writes 344 B, and
      * 1.19.7 then has both at PV_UNITY) */
@@ -1089,6 +1091,11 @@ static UI_LATE int pv_cc(uint32_t c, uint32_t v)   /* audio interrupt: controlle
 static volatile uint16_t cm_q[8];        /* audio interrupt -> main loop: (line << 7 | value) */
 static volatile uint8_t cm_h, cm_t;
 static volatile uint8_t cm_arm;          /* learn armed (cm_run: a line waiting) */
+#define FM1CP_FN UI_LATE
+#define FM1CP_NO_STEP                    /* (app_say's strip shows it and times it out) */
+#include "control_popup.c"               /* CC SHOW: fm1-waveloop-kits' control popup (GPL-3.0-only) */
+static fm1cp cc_pop = {.min_ms = 40u};   /* audio interrupt -> main loop: the newest fixed map controller moved
+                                          * (cp_run), at most one message each 40 ms */
 static volatile uint8_t cm_lrn;          /* the controller learn took, | 0x80 */
 static uint8_t cm_ed, cm_v;              /* the list: 1 a line's number changed (cm_v, 128 none; learn armed), 2 RESET
                                           * ALL asked */
@@ -1268,6 +1275,7 @@ static UI_LATE void ve_check(settings_t *s, int n)   /* GLO > VELOCITY: an older
         uint8_t o[7];
         for (k = 0; k < 7u; k++) o[k] = n >= SET_LEN_V17 && s->cm_ok == PC_V1 ? s->cm[k] : 0u;
         s->cm_ok = CM_V1;
+        s->cm_show = 0;
         for (k = 0; k < 128u; k++) s->cm[k] = 0;
         for (k = 0; k < 7u; k++)
             if (o[k] && o[k] <= 128u) cm_put(s->cm, o[k] - 1u, cm_mig(s->pm[k], k));
@@ -4890,6 +4898,10 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         }
         if ((st & 0xF0u) == 0xB0u) re_cc = 1u;   /* (the remote editor told, remote.c: the engine's page A) */
 #ifdef HYB_MULTI
+        if ((st & 0xF0u) == 0xB0u && set.cm_show)   /* (CC SHOW: cp_run says it) */
+            fm1cp_post(&cc_pop, pkt >> 16 & 0x7Fu, pkt >> 24 & 0x7Fu, in_parts(st));
+#endif
+#ifdef HYB_MULTI
         if (M.mode == SY_M_CHANNELS && (set.mo & MO_BOMNI)) {   /* (1.19.4: B IN OMNI: part B every channel, A by
                                           * A IN) */
             if (in_parts(st) & 1u) eng_to(EM_A, st, pkt >> 16 & 0x7Fu, pkt >> 24 & 0x7Fu);
@@ -6629,6 +6641,7 @@ enum { G_NONE, G_TR, G_MIDI, G_BT, G_AUDIO, G_BACK, G_CH, G_THRU, G_CLK, G_PANIC
        G_BOUT, G_ACH, G_BCH, G_CLKO,     /* (1.19.4: B CHANNEL > OUT; MIDI's A CHANNEL, B CHANNEL (their pages: IN, G_CH /
                                           * G_MCHB, and OUT, G_OCH / G_BOUT), CLK OFFSET) */
        G_CLKL,                           /* (1.19.5: MIDI's CLK LOCK, ON / OFF) */
+       G_CCSHOW,                         /* (MIDI's CC SHOW, ON / OFF: set.cm_show) */
 #elif FM1B_BLE
        G_UNI, G_UNIM, G_UAUTO, G_STEAL,  /* (AUDIO's unison settings, in md_pad) */
 #endif
@@ -6645,7 +6658,9 @@ enum { GP_TOP, GP_MIDI, GP_BT, GP_AUDIO, GP_ABOUT, GP_IN, GP_OUT, GP_CLK,
 _Static_assert(SQ_PARP == 1u << (G_SPARP - G_SPARP) && SQ_NLAT == 1u << (G_SKLAT - G_SPARP)
                && SQ_NRQ == 1u << (G_SRQ - G_SPARP) && SQ_DOUT == 1u << (G_SDOUT - G_SPARP),
                "GLO > SEQ: the pad's bits in their order (DRUM OUT's too)");
-#ifdef HYB_VELO
+#ifdef HYB_MULTI
+#define GLO_PMAX 14u                     /* a page's lines at most (MIDI's 14: CC SHOW) */
+#elif defined(HYB_VELO)
 #define GLO_PMAX 13u                     /* a page's lines at most (1.18C48: AUDIO's 13) */
 #else
 #define GLO_PMAX 11u
@@ -6659,7 +6674,7 @@ _Static_assert(SQ_PARP == 1u << (G_SPARP - G_SPARP) && SQ_NLAT == 1u << (G_SKLAT
 static const uint8_t GLO_PAGE[GP_N][GLO_PMAX] = {{G_TR, G_VELO, G_MULTI, G_MIDI, G_BT, G_AUDIO, G_SEQ, G_KIT, G_KEYL,
                                                   G_ASAVE, G_ABOUT, G_BACK},
                                                  {G_ACH, G_BCH, G_DRCH, G_INP, G_OUT, G_CLKP, G_CLKO, G_CLKL, G_THRU,
-                                                  G_VCC, G_CC, G_PANIC, G_BACK},
+                                                  G_VCC, G_CC, G_CCSHOW, G_PANIC, G_BACK},
                                                  {G_BLE, G_SEARCH, G_FORGET, G_AUTO, G_BACK},
                                                  {G_LAT, G_MAXV, G_UNI, G_UNIL, G_UNIM, G_UAUTO, G_STEAL, G_VOL, G_ENG,
                                                   G_RVQ, G_OSC, G_FLT, G_BACK},
@@ -6672,7 +6687,7 @@ static const uint8_t GLO_PAGE[GP_N][GLO_PMAX] = {{G_TR, G_VELO, G_MULTI, G_MIDI,
                                                  {G_VON, G_VFIX, G_VCRV, G_VSENS, G_VDRUM, G_VCAL, G_BACK},
                                                  {G_VK0, G_VK1, G_VK2, G_VK3, G_VK4, G_VK5, G_VK6, G_VSKIP, G_VNORM,
                                                   G_VRST, G_BACK}};
-static const uint8_t GLO_PN[GP_N] = {12, 13, 5, 13, 6, 4, 2, 3, 11, 3, 3, 8, 7, 11};
+static const uint8_t GLO_PN[GP_N] = {12, 14, 5, 13, 6, 4, 2, 3, 11, 3, 3, 8, 7, 11};
 #elif FM1B_BLE
 static const uint8_t GLO_PAGE[GP_N][GLO_PMAX] = {{G_TR, G_MIDI, G_BT, G_AUDIO, G_KEYL, G_ASAVE, G_SEQ, G_KIT, G_ABOUT,
                                                   G_BACK},
@@ -6689,7 +6704,7 @@ static const uint8_t GLO_PN[GP_N] = {10, 9, 5, 9, 6, 4, 3, 3, 6};   /* (AUDIO: U
 static const uint8_t GLO_PAGE[GP_N][GLO_PMAX] = {{G_TR, G_VELO, G_MULTI, G_MIDI, G_AUDIO, G_SEQ, G_KIT, G_KEYL, G_ASAVE,
                                                   G_ABOUT, G_BACK},
                                                  {G_ACH, G_BCH, G_DRCH, G_INP, G_OUT, G_CLKP, G_CLKO, G_CLKL, G_THRU,
-                                                  G_VCC, G_CC, G_PANIC, G_BACK},
+                                                  G_VCC, G_CC, G_CCSHOW, G_PANIC, G_BACK},
                                                  {G_BACK},
                                                  {G_LAT, G_MAXV, G_UNI, G_UNIL, G_UNIM, G_UAUTO, G_STEAL, G_VOL, G_ENG,
                                                   G_RVQ, G_OSC, G_FLT, G_BACK},
@@ -6702,7 +6717,7 @@ static const uint8_t GLO_PAGE[GP_N][GLO_PMAX] = {{G_TR, G_VELO, G_MULTI, G_MIDI,
                                                  {G_VON, G_VFIX, G_VCRV, G_VSENS, G_VDRUM, G_VCAL, G_BACK},
                                                  {G_VK0, G_VK1, G_VK2, G_VK3, G_VK4, G_VK5, G_VK6, G_VSKIP, G_VNORM,
                                                   G_VRST, G_BACK}};
-static const uint8_t GLO_PN[GP_N] = {11, 13, 1, 13, 6, 3, 2, 3, 11, 3, 3, 8, 7, 11};
+static const uint8_t GLO_PN[GP_N] = {11, 14, 1, 13, 6, 3, 2, 3, 11, 3, 3, 8, 7, 11};
 #else   /* the USB build (no Bluetooth): no BLUETOOTH page (GP_BT stays, out of reach), no BT port in */
 static const uint8_t GLO_PAGE[GP_N][GLO_PMAX] = {{G_TR, G_MIDI, G_AUDIO, G_KEYL, G_ASAVE, G_SEQ, G_KIT, G_ABOUT, G_BACK},
                                                  {G_CH, G_INP, G_OUT, G_CLKP, G_THRU, G_VCC, G_CC, G_PANIC, G_BACK},
@@ -6754,7 +6769,7 @@ static const char *const G_NAME[G_N] = {"", "TRANSPOSE", "MIDI", "BLUETOOTH", "A
                                         "VELOCITY", "VELOCITY", "FIXED", "CURVE", "SENSITIVITY", "DRUM ACC", "CALIBRATE",
                                         "C#5", "D5", "D#5", "E5", "F5", "F#5", "G5", "CHECK", "RESET", "SKIP KEY",
                                         "DRUM CHANNEL", "OUT", "A CHANNEL", "B CHANNEL", "CLK OFFSET",
-                                        "CLK LOCK",
+                                        "CLK LOCK", "CC SHOW",
 #elif FM1B_BLE
                                         "UNISON MAX", "MONO UNI MAX", "UNISON AUTO", "STEAL",
 #endif
@@ -7570,6 +7585,7 @@ static UI_LATE void glo_val(uint32_t g, char *v)   /* a line's value ("" none) *
 #endif
 #ifdef HYB_MULTI
     else if (g == G_CLKL) text_cat(v, set.ck_fl & CK_FL_UNLOCK ? "OFF" : "ON");
+    else if (g == G_CCSHOW) text_cat(v, set.cm_show ? "ON" : "OFF");
 #endif
     else if (g == G_THRU || g == G_AUTO || g == G_BLE)
         text_cat(v, (g == G_THRU ? set.thru : g == G_AUTO ? set.ble_auto : !set.ble_off) ? "ON" : "OFF");
@@ -7875,6 +7891,9 @@ static UI_LATE void glo_rec(void)                /* REC on the cursor's line */
 #ifdef HYB_MULTI
     } else if (g == G_CLKL) {            /* (1.19.5) CLK LOCK: ck_lock takes it at its next block */
         set.ck_fl ^= CK_FL_UNLOCK;
+        glo_touch();
+    } else if (g == G_CCSHOW) {          /* CC SHOW: the audio interrupt reads it at the next controller */
+        set.cm_show = (uint8_t)!set.cm_show;
         glo_touch();
 #endif
     } else if (g == G_KEYL) {
@@ -8654,6 +8673,22 @@ static UI_LATE void cm_run(uint32_t now)         /* (1.19.6) main loop: learn's 
         edit_set(p_byte(p), v, now);
         ui.d_rows = ui.d_lcd = 1;
     }
+}
+static UI_LATE void cp_run(uint32_t now)         /* CC SHOW, main loop: the newest fixed map controller moved says its
+                                          * parameter and the value the engine took (sy_set_param: the byte itself,
+                                          * the list's last past its end), as the panel says a knob's; in CHANNELS its
+                                          * part first. Moved lines and learn say theirs through edit_set (cm_run) */
+{
+    fm1cp_notice n;
+    const u_param_t *p;
+    char a[24], v[16];
+    if (!fm1cp_take(&cc_pop, now, &n) || !n.part || n.id >= 120u || (p = cm_line(n.id)) == 0) return;   /* (no
+                                          * part listens: the engine took nothing) */
+    a[0] = 0;
+    if (M.mode == SY_M_CHANNELS && n.part != 3u) text_cat(a, n.part == 2u ? "B " : "A ");
+    p_name(p, a);
+    value_text(p, n.value > p_max(p) ? p_max(p) : n.value, v);
+    app_say(a, v);
 }
 #endif
 static UI_LATE void pc_item(uint32_t i, char *t, char *pre, uint32_t *fl)   /* a control's choices: DEFAULT, SMART (each with
@@ -15238,6 +15273,7 @@ UI_SMALL void app_frame(void)
     input();
 #ifdef HYB_MULTI
     cm_run(now);                         /* (1.19.6: the MIDI CC map's learn and moved lines) */
+    cp_run(now);                         /* (CC SHOW: a fixed map controller's parameter and value) */
     ln_idle();                           /* (the launcher's rows: the next one's patterns asked before its line) */
 #endif
     hold_zone_fix();                     /* (1.16: SPLIT, a key let go latched by the part edited's HOLD, its zone's

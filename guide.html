@@ -173,6 +173,7 @@
 <li>External clock: <span class="scr">CLK LOCK</span> (on as standard) keeps the sequencers, the drums and the launcher on the clock's beat, not only its tempo. <span class="scr">CLK OFFSET</span> (-50 to +50 ms, negative is earlier) shifts against that beat. Two FM-1 over Bluetooth: start around -35 ms and adjust by ear.</li>
 <li>A sustain pedal works over MIDI (CC 64), for each part on its own channel.</li>
 <li><span class="scr">GLO › MIDI › MIDI CC</span> lists the controller numbers and what each changes. Go onto a line and press <kbd>REC</kbd>, then move a knob on your controller (learn), or choose the number with <kbd>SELECT</kbd> and press <kbd>REC</kbd>. Every parameter can get a number, one number per parameter. The fixed lines (mod wheel, sustain pedal, all notes off, the part volume CCs) cannot be changed. <span class="scr">RESET ALL</span> puts every line back. A remapped controller moves its parameter like the knob on the device, and the display follows. The list is global: press <kbd>SAVE</kbd> in <kbd>GLO</kbd> to keep it.</li>
+<li><span class="scr">GLO › MIDI › CC SHOW</span> (two-part builds): when on, a controller on its own number shows its parameter and value in the strip as it moves, the way the device's knobs do. You see what your controller is changing.</li>
 <li>Bluetooth: switch the FM-1 on first, then your device. Go to <span class="scr">GLO › BLUETOOTH › SEARCH</span>, choose the device and press <kbd>REC</kbd>. Next time it connects by itself. <span class="scr">FORGET</span> clears the list.</li>
 <li>Hold <kbd>REC</kbd> for a second to switch Bluetooth on or off.</li>
 <li>Over USB the FM-1 is also a sound card: record it straight into your computer. Turn <kbd>MASTER</kbd> well up.</li>
@@ -188,6 +189,7 @@
 <tr><td><span class="scr">GLO › MIDI › CLK LOCK</span></td><td>on as standard.</td></tr>
 <tr><td><span class="scr">GLO › MIDI › CLK OFFSET</span></td><td>0 ms as standard.</td></tr>
 <tr><td><span class="scr">GLO › MIDI › MIDI CC</span></td><td>every line on its own number as standard.</td></tr>
+<tr><td><span class="scr">GLO › MIDI › CC SHOW</span></td><td>off as standard.</td></tr>
 <tr><td><span class="scr">GLO › AUTO SAVE</span></td><td>off as standard: only <kbd>SAVE</kbd> writes.</td></tr>
 </table>
 <p>Press <kbd>SAVE</kbd> inside <kbd>GLO</kbd> to keep your settings.</p>
